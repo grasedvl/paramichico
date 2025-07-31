@@ -1,159 +1,105 @@
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import {
+  getFirestore,
+  collection,
+  addDoc,
+  getDocs,
+  serverTimestamp,
+  query,
+  orderBy
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.5.2/firebase-app.js";
-import { getFirestore, collection, addDoc, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.5.2/firebase-firestore.js";
-
-// Firebase config
 const firebaseConfig = {
   apiKey: "AIzaSyAOKCX49ywXjCzO3GLD8hd0wvo4FzSJMj0",
   authDomain: "hparamichico.firebaseapp.com",
   projectId: "hparamichico",
-  storageBucket: "hparamichico.firebasestorage.app",
+  storageBucket: "hparamichico.appspot.com",
   messagingSenderId: "54807329434",
   appId: "1:54807329434:web:b21a189aecc38b5349bd23",
   measurementId: "G-ZLGR1TZX40"
 };
 
-// Init Firebase
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// HTML elements
-const form = document.getElementById("diaryForm");
-const entriesContainer = document.getElementById("entriesContainer");
-const imageUpload = document.getElementById("imageUpload");
-const savedCountEl = document.getElementById("savedCount");
+const form = document.querySelector("form");
+const titleInput = document.getElementById("title");
+const contentInput = document.getElementById("content");
+const spotifyInput = document.getElementById("spotify");
+const entriesContainer = document.getElementById("entries");
+const savedCount = document.getElementById("savedCount");
 
-document.addEventListener("DOMContentLoaded", () => {
-  loadEntries();
-});
-
-form.addEventListener("submit", async function (e) {
-  e.preventDefault();
-
-  const titleRaw = document.getElementById("title").value.trim();
-  const content = document.getElementById("content").value.trim();
-  const spotifyLinkRaw = document.getElementById("spotifyLink").value.trim();
-  const title = sanitizeTitle(titleRaw);
-  const date = new Date().toLocaleDateString("id-ID", {
-    weekday: "short",
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-
-  let imageData = null;
-  if (imageUpload.files[0]) {
-    imageData = await readFileAsDataURL(imageUpload.files[0]);
-  }
-
-  const spotify = parseSpotify(spotifyLinkRaw);
-
-  const entry = {
-    title: title || "Untitled",
+async function saveToFirestore(title, content, spotify) {
+  await addDoc(collection(db, "entries"), {
+    title,
     content,
-    date,
-    imageData,
     spotify,
-    createdAt: Date.now()
-  };
-
-  try {
-    await addDoc(collection(db, "entries"), entry);
-    prependEntry(entry);
-    form.reset();
-    updateSavedCount();
-  } catch (err) {
-    alert("Error saving entry: " + err.message);
-  }
-});
-
-function sanitizeTitle(t) {
-  return t.replace(/\p{Emoji_Presentation}/gu, "").trim();
-}
-
-function readFileAsDataURL(file) {
-  return new Promise((res) => {
-    const reader = new FileReader();
-    reader.onload = () => res(reader.result);
-    reader.readAsDataURL(file);
+    createdAt: serverTimestamp()
   });
 }
 
-function parseSpotify(link) {
-  try {
-    if (!link) return null;
-    const u = new URL(link);
-    if (!/spotify\.com/.test(u.hostname)) return null;
-    const parts = u.pathname.split("/");
-    if (parts[1] === "track" && parts[2]) {
-      return {
-        type: "track",
-        id: parts[2].split("?")[0],
-        raw: link,
-      };
-    }
-    return null;
-  } catch (e) {
-    return null;
-  }
-}
-
-async function loadEntries() {
-  entriesContainer.innerHTML = "";
-  const q = query(collection(db, "entries"), orderBy("createdAt", "desc"));
-  const querySnapshot = await getDocs(q);
-  const entries = [];
-  querySnapshot.forEach((doc) => {
-    entries.push(doc.data());
-  });
-  entries.forEach(prependEntry);
-  updateSavedCount(entries.length);
-}
-
-function prependEntry(entry) {
+function createCard(entry) {
   const card = document.createElement("div");
-  card.classList.add("entry-card");
-  card.innerHTML = \`
-    <div class="entry-meta">
-      <div class="entry-title">\${escapeHtml(entry.title)}</div>
-      <div class="entry-date">\${entry.date}</div>
-    </div>
-    <div class="entry-body">\${escapeHtml(entry.content)}</div>
-    <div class="entry-media"></div>
-  \`;
+  card.classList.add("card");
 
-  const mediaWrapper = card.querySelector(".entry-media");
+  const h2 = document.createElement("h2");
+  h2.textContent = entry.title;
 
-  if (entry.imageData) {
-    const img = document.createElement("img");
-    img.src = entry.imageData;
-    img.alt = "Foto kenangan";
-    mediaWrapper.appendChild(img);
-  }
+  const p = document.createElement("p");
+  p.textContent = entry.content;
 
-  if (entry.spotify && entry.spotify.type === "track") {
+  card.appendChild(h2);
+  card.appendChild(p);
+
+  if (entry.spotify) {
     const iframe = document.createElement("iframe");
-    iframe.src = \`https://open.spotify.com/embed/track/\${entry.spotify.id}\`;
+    iframe.src = entry.spotify;
     iframe.width = "100%";
     iframe.height = "80";
-    iframe.allow = "encrypted-media";
     iframe.frameBorder = "0";
+    iframe.allow = "autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture";
     iframe.allowFullscreen = true;
-    iframe.style.borderRadius = "8px";
-    mediaWrapper.appendChild(iframe);
+    card.appendChild(iframe);
   }
 
   entriesContainer.appendChild(card);
 }
 
-function updateSavedCount(count = 0) {
-  savedCountEl.textContent = \`\${count} entr\${count === 1 ? "y" : "ies"}\`;
+async function loadEntries() {
+  const q = query(collection(db, "entries"), orderBy("createdAt", "desc"));
+  const querySnapshot = await getDocs(q);
+  entriesContainer.innerHTML = "";
+
+  let count = 0;
+  querySnapshot.forEach((doc) => {
+    const entry = doc.data();
+    if (entry.title && entry.content) {
+      createCard(entry);
+      count++;
+    }
+  });
+
+  savedCount.textContent = count;
 }
 
-function escapeHtml(s) {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+
+  const title = titleInput.value.trim();
+  const content = contentInput.value.trim();
+  const spotify = spotifyInput.value.trim();
+
+  if (!title || !content) {
+    alert("Please fill in the title and content!");
+    return;
+  }
+
+  await saveToFirestore(title, content, spotify);
+  await loadEntries();
+
+  titleInput.value = "";
+  contentInput.value = "";
+  spotifyInput.value = "";
+});
+
+window.addEventListener("DOMContentLoaded", loadEntries);
