@@ -1,9 +1,27 @@
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.5.2/firebase-app.js";
+import { getFirestore, collection, addDoc, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.5.2/firebase-firestore.js";
+
+// Firebase config
+const firebaseConfig = {
+  apiKey: "AIzaSyAOKCX49ywXjCzO3GLD8hd0wvo4FzSJMj0",
+  authDomain: "hparamichico.firebaseapp.com",
+  projectId: "hparamichico",
+  storageBucket: "hparamichico.firebasestorage.app",
+  messagingSenderId: "54807329434",
+  appId: "1:54807329434:web:b21a189aecc38b5349bd23",
+  measurementId: "G-ZLGR1TZX40"
+};
+
+// Init Firebase
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+// HTML elements
 const form = document.getElementById("diaryForm");
 const entriesContainer = document.getElementById("entriesContainer");
 const imageUpload = document.getElementById("imageUpload");
 const savedCountEl = document.getElementById("savedCount");
-
-const STORAGE_KEY = "him_diary_entries";
 
 document.addEventListener("DOMContentLoaded", () => {
   loadEntries();
@@ -31,31 +49,32 @@ form.addEventListener("submit", async function (e) {
   const spotify = parseSpotify(spotifyLinkRaw);
 
   const entry = {
-    id: Date.now(),
     title: title || "Untitled",
     content,
     date,
     imageData,
     spotify,
+    createdAt: Date.now()
   };
 
-  saveEntry(entry);
-  prependEntry(entry);
-  form.reset();
-  updateSavedCount();
+  try {
+    await addDoc(collection(db, "entries"), entry);
+    prependEntry(entry);
+    form.reset();
+    updateSavedCount();
+  } catch (err) {
+    alert("Error saving entry: " + err.message);
+  }
 });
 
 function sanitizeTitle(t) {
-  // strip emojis by removing characters in certain unicode ranges (basic attempt)
   return t.replace(/\p{Emoji_Presentation}/gu, "").trim();
 }
 
 function readFileAsDataURL(file) {
   return new Promise((res) => {
     const reader = new FileReader();
-    reader.onload = function () {
-      res(reader.result);
-    };
+    reader.onload = () => res(reader.result);
     reader.readAsDataURL(file);
   });
 }
@@ -79,48 +98,32 @@ function parseSpotify(link) {
   }
 }
 
-function saveEntry(entry) {
-  const arr = getStored();
-  arr.unshift(entry);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
-}
-
-function getStored() {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return [];
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
-}
-
-function loadEntries() {
-  const arr = getStored();
-  arr.forEach(prependEntry);
-  updateSavedCount();
+async function loadEntries() {
+  entriesContainer.innerHTML = "";
+  const q = query(collection(db, "entries"), orderBy("createdAt", "desc"));
+  const querySnapshot = await getDocs(q);
+  const entries = [];
+  querySnapshot.forEach((doc) => {
+    entries.push(doc.data());
+  });
+  entries.forEach(prependEntry);
+  updateSavedCount(entries.length);
 }
 
 function prependEntry(entry) {
   const card = document.createElement("div");
   card.classList.add("entry-card");
-  card.setAttribute("data-id", entry.id);
-
-  // Tambahkan tombol hapus + struktur entry
-  const mediaHtml = `
+  card.innerHTML = \`
     <div class="entry-meta">
-      <div class="entry-title">${escapeHtml(entry.title)}</div>
-      <div class="entry-date">${entry.date}</div>
+      <div class="entry-title">\${escapeHtml(entry.title)}</div>
+      <div class="entry-date">\${entry.date}</div>
     </div>
-    <div class="entry-body">${escapeHtml(entry.content)}</div>
+    <div class="entry-body">\${escapeHtml(entry.content)}</div>
     <div class="entry-media"></div>
-  `;
-
-  card.innerHTML = `<button class="remove-btn" aria-label="hapus entry">✕</button>` + mediaHtml;
+  \`;
 
   const mediaWrapper = card.querySelector(".entry-media");
 
-  // Tambahkan gambar kalau ada
   if (entry.imageData) {
     const img = document.createElement("img");
     img.src = entry.imageData;
@@ -128,10 +131,9 @@ function prependEntry(entry) {
     mediaWrapper.appendChild(img);
   }
 
-  // Tambahkan Spotify embed kalau ada
   if (entry.spotify && entry.spotify.type === "track") {
     const iframe = document.createElement("iframe");
-    iframe.src = `https://open.spotify.com/embed/track/${entry.spotify.id}`;
+    iframe.src = \`https://open.spotify.com/embed/track/\${entry.spotify.id}\`;
     iframe.width = "100%";
     iframe.height = "80";
     iframe.allow = "encrypted-media";
@@ -141,33 +143,13 @@ function prependEntry(entry) {
     mediaWrapper.appendChild(iframe);
   }
 
-  // ⛔⛔⛔ DI SINI letakkan event listener delete-nya
-  const removeBtn = card.querySelector(".remove-btn");
-  if (removeBtn) {
-    removeBtn.addEventListener("click", () => {
-      const confirmDelete = confirm("Are you sure you want to delete this entry?");
-      if (confirmDelete) {
-        removeEntry(entry.id);
-        card.remove();
-        updateSavedCount();
-      }
-    });
-  }
-
-  entriesContainer.prepend(card);
+  entriesContainer.appendChild(card);
 }
 
-function removeEntry(id) {
-  const arr = getStored().filter((e) => e.id !== id);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
+function updateSavedCount(count = 0) {
+  savedCountEl.textContent = \`\${count} entr\${count === 1 ? "y" : "ies"}\`;
 }
 
-function updateSavedCount() {
-  const count = getStored().length;
-  savedCountEl.textContent = `${count} entr${count === 1 ? "y" : "ies"}`;
-}
-
-// basic escaping to avoid injection
 function escapeHtml(s) {
   return s
     .replace(/&/g, "&amp;")
@@ -175,4 +157,3 @@ function escapeHtml(s) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
-
